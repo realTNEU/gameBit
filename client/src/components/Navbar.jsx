@@ -2,20 +2,15 @@ import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FaUserCircle } from "react-icons/fa";
 
+import useAuthStore from "../store/authStore";
+
 function Navbar() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const { user, logout, isAuthenticated } = useAuthStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if user is logged in (token in localStorage)
-    const token = localStorage.getItem("token");
-    setIsLoggedIn(!!token);
-  }, []);
-
-  useEffect(() => {
-    // Close dropdown if clicking outside
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setDropdownOpen(false);
@@ -25,10 +20,16 @@ function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    setIsLoggedIn(false);
+  const handleLogout = async () => {
+    await logout();
     navigate("/login");
+  };
+
+  const getDashboardPath = () => {
+    if (user?.isAdmin) return "/dashboard/admin";
+    if (user?.seller && user?.sellerApproved) return "/dashboard/seller";
+    if (user?.escrowAgent && user?.escrowApproved) return "/dashboard/escrow";
+    return "/dashboard/user";
   };
 
   return (
@@ -53,23 +54,23 @@ function Navbar() {
           Become a Seller
         </Link>
 
-        {/* If logged in → show profile dropdown */}
-        {isLoggedIn ? (
+        {isAuthenticated ? (
           <div className="relative" ref={dropdownRef}>
             <button
               className="flex items-center text-gray-700 hover:text-indigo-700 focus:outline-none"
               onClick={() => setDropdownOpen(!dropdownOpen)}
             >
               <FaUserCircle size={28} />
+              <span className="ml-2">{user?.username}</span>
             </button>
             {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-40 bg-white rounded-lg shadow-lg border">
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border">
                 <Link
-                  to="/account"
+                  to={getDashboardPath()}
                   className="block px-4 py-2 text-gray-700 hover:bg-indigo-100"
                   onClick={() => setDropdownOpen(false)}
                 >
-                  View Account
+                  Dashboard
                 </Link>
                 <button
                   onClick={handleLogout}

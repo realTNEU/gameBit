@@ -23,16 +23,25 @@ const userSchema = new Schema({
   lastName:  { type: String, required: true },
   email:     { type: String, required: true, unique: true },
   username:  { type: String, required: true, unique: true },
-  password:  { type: String, required: true }, // hashed
-  phone:     { type: String, default: null },   // encrypted string (ciphertext)
+  password:  { type: String, required: true },
+  phone:     { type: String, default: null },
   avatar:    { type: String, default: null },
   addresses: { type: Map, of: addressSchema, default: {} },
   seller:    { type: Boolean, default: false },
+  sellerApproved: { type: Boolean, default: false },
+  sellerApplicationDate: { type: Date, default: null },
+  escrowAgent: { type: Boolean, default: false },
+  escrowApproved: { type: Boolean, default: false },
+  escrowApplicationDate: { type: Date, default: null },
   pastOrders:[{ type: Schema.Types.ObjectId, ref: "Order" }],
   isAdmin:   { type: Boolean, default: false },
-  // reviews authored BY this user
   reviews:   { type: [authoredReviewSchema], default: [] },
-  blacklist: { type: Boolean, default: false }
+  blacklist: { type: Boolean, default: false },
+  online: { type: Boolean, default: false },
+  lastSeen: { type: Date, default: Date.now },
+  isEmailVerified: { type: Boolean, default: false },
+  emailVerificationOTP: { type: String, default: null },
+  emailVerificationOTPExpiry: { type: Date, default: null }
 }, { timestamps: true });
 
 export default model("User", userSchema);

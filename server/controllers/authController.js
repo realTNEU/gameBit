@@ -1,11 +1,12 @@
-// server/controllers/authController.js
 import User from "../models/User.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { encryptText, decryptText } from "../utils/crypto.js";
+import { sendVerificationOTP, generateOTP } from "../utils/emailService.js";
 
 const SALT_ROUNDS = 10;
-const JWT_EXPIRES = "7d"; // change as needed
+const JWT_EXPIRES = "7d";
+const OTP_EXPIRY_MINUTES = 10;
 
 export const signup = async (req, res) => {
   try {
@@ -26,6 +27,10 @@ export const signup = async (req, res) => {
     // Encrypt phone if provided
     const encryptedPhone = phone ? encryptText(phone) : null;
 
+    const otp = generateOTP();
+    const otpExpiry = new Date();
+    otpExpiry.setMinutes(otpExpiry.getMinutes() + OTP_EXPIRY_MINUTES);
+
     const user = await User.create({
       firstName,
       lastName,
@@ -33,10 +38,17 @@ export const signup = async (req, res) => {
       username,
       password: hashed,
       phone: encryptedPhone,
-      avatar: avatar || null
+      avatar: avatar || null,
+      emailVerificationOTP: otp,
+      emailVerificationOTPExpiry: otpExpiry,
+      isEmailVerified: false
     });
 
-    // Create JWT and set cookie (auto-login)
+    const emailSent = await sendVerificationOTP(email, otp);
+    if (!emailSent) {
+      console.error("Failed to send verification email");
+    }
+
     const token = jwt.sign({ id: user._id, username: user.username, isAdmin: user.isAdmin }, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.cookie("token", token, {
       httpOnly: true,
@@ -45,7 +57,11 @@ export const signup = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    return res.status(201).json({ message: "User created", userId: user._id });
+    return res.status(201).json({ 
+      message: "User created. Please verify your email.", 
+      userId: user._id,
+      requiresVerification: true
+    });
   } catch (err) {
     console.error("signup error:", err);
     return res.status(500).json({ message: "Server error", error: err.message });
@@ -62,6 +78,13 @@ export const login = async (req, res) => {
 
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(400).json({ message: "Invalid credentials" });
+
+    if (!user.isEmailVerified) {
+      return res.status(403).json({ 
+        message: "Please verify your email before logging in",
+        requiresVerification: true
+      });
+    }
 
     const token = jwt.sign({ id: user._id, username: user.username, isAdmin: user.isAdmin }, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRES });
 
@@ -92,7 +115,7 @@ export const me = async (req, res) => {
     const id = req.user?.id;
     if (!id) return res.status(401).json({ message: "Not authenticated" });
 
-    const user = await User.findById(id).select("-password -__v");
+    const user = await User.findById(id).select("-password -__v -emailVerificationOTP");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const userObj = user.toObject();
@@ -102,6 +125,74 @@ export const me = async (req, res) => {
     return res.json({ user: userObj });
   } catch (err) {
     console.error("me error:", err);
+    return res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+export const verifyEmail = async (req, res) => {
+  try {
+    const { otp } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+    if (!otp) return res.status(400).json({ message: "OTP is required" });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (user.isEmailVerified) {
+      return res.json({ message: "Email already verified" });
+    }
+
+    if (!user.emailVerificationOTP || user.emailVerificationOTP !== otp) {
+      return res.status(400).json({ message: "Invalid OTP" });
+    }
+
+    if (new Date() > user.emailVerificationOTPExpiry) {
+      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    }
+
+    user.isEmailVerified = true;
+    user.emailVerificationOTP = null;
+    user.emailVerificationOTPExpiry = null;
+    await user.save();
+
+    return res.json({ message: "Email verified successfully" });
+  } catch (err) {
+    console.error("verifyEmail error:", err);
+    return res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+export const resendOTP = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (user.isEmailVerified) {
+      return res.json({ message: "Email already verified" });
+    }
+
+    const otp = generateOTP();
+    const otpExpiry = new Date();
+    otpExpiry.setMinutes(otpExpiry.getMinutes() + OTP_EXPIRY_MINUTES);
+
+    user.emailVerificationOTP = otp;
+    user.emailVerificationOTPExpiry = otpExpiry;
+    await user.save();
+
+    const emailSent = await sendVerificationOTP(user.email, otp);
+    if (!emailSent) {
+      return res.status(500).json({ message: "Failed to send verification email" });
+    }
+
+    return res.json({ message: "Verification OTP sent to your email" });
+  } catch (err) {
+    console.error("resendOTP error:", err);
     return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
